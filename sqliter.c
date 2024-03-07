@@ -31,6 +31,8 @@ int main(int argc, char **argv)
 
     // insert_into("test", vals, 2);
 
+    // delete_where("test", arr);
+
     select_all("test", callback, 100);
 
     select_where("test", callback, arr);

@@ -5,27 +5,9 @@
 #include <string.h>
 
 sqlite3 * db;
+// ============================ INTERNAL FUNCTIONS ============================
 
-void printsql(char * sql){
-    printf("[SQLiter] SQL: %s\n", sql);
-}
-
-// Execute any SQL statement
-int exec(char * sql, char * zErrMsg, int (*callback)(void *, int, char **, char **)){
-
-    int rc = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
-    
-    if( rc != SQLITE_OK ){
-        fprintf(stderr, "[SQLiter] error: %s\n", zErrMsg);
-        sqlite3_free(zErrMsg);
-        exit(-1);
-    }
-
-    return rc;
-
-}
-
-void check_connected(sqlite3 * db)
+static void check_connected(sqlite3 * db)
 {
     if(db == NULL)
     {
@@ -34,57 +16,13 @@ void check_connected(sqlite3 * db)
     }   
 }
 
-// ============================ CONNECT AND DISCONNECT FUNCTIONS ============================
 
-int disconnect()
-{
-    if(sqlite3_close(db) != SQLITE_OK) return -1;
-    return 0;
+static void printsql(char * sql){
+    printf("[SQLiter] SQL: %s\n", sql);
 }
 
-int connect()
+static char * create_where_clause(struct t_dict_arr * arr)
 {
-    int rc;
-    
-    rc = sqlite3_open(DB_NAME, &db);
-    
-    if( rc != SQLITE_OK )
-    {
-        fprintf(stderr, "[SQLiter] No se pudo conectar a la base de datos: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
-        exit(-1);
-    }
-
-    return 0;
-}
-
-// ============================ EXECUTE COMMON SQL STATEMENTS ============================
-
-void select_all(char * table, int (*callback)(void *, int, char **, char **), int limit)
-{
-    int rc;
-    char *zErrMsg = 0;
-    check_connected(db);
-        
-    char * def_str = "SELECT * FROM ";
-    char * sql = (char*) malloc(strlen(table) + strlen(def_str));
-
-    strcpy(sql, def_str);
-    strcat(sql, table);
-
-    exec(sql, zErrMsg, callback);
-    printsql(sql);
-
-    free(sql);
-
-}
-
-void select_where(char *table, int (*callback)(void *, int, char **, char **), struct t_dict_arr * arr)
-{
-    int rc;
-    char *zErrMsg = 0;
-    check_connected(db);
-
     size_t prompt_s = 0;
 
     for(int i = 0; i < arr->length; i++)
@@ -119,6 +57,62 @@ void select_where(char *table, int (*callback)(void *, int, char **, char **), s
             strcat(wh_clauses, "AND ");
     }
 
+    return wh_clauses;
+
+}
+
+// ============================ CONNECT AND DISCONNECT FUNCTIONS ============================
+
+int disconnect()
+{
+    if(sqlite3_close(db) != SQLITE_OK) return -1;
+    return 0;
+}
+
+int connect()
+{
+    int rc;
+    
+    rc = sqlite3_open(DB_NAME, &db);
+    
+    if( rc != SQLITE_OK )
+    {
+        fprintf(stderr, "[SQLiter] No se pudo conectar a la base de datos: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        exit(-1);
+    }
+
+    return 0;
+}
+
+// ============================ EXECUTE COMMON SQL STATEMENTS ============================
+
+int select_all(char * table, int (*callback)(void *, int, char **, char **), int limit)
+{
+    char *zErrMsg = 0;
+    check_connected(db);
+        
+    char * def_str = "SELECT * FROM ";
+    char * sql = (char*) malloc(strlen(table) + strlen(def_str));
+
+    strcpy(sql, def_str);
+    strcat(sql, table);
+
+    if(exec(sql, zErrMsg, callback) == EXIT_FAILURE) return EXIT_FAILURE;
+    printsql(sql);
+
+    free(sql);
+
+    return EXIT_SUCCESS;
+}
+
+int select_where(char *table, int (*callback)(void *, int, char **, char **), struct t_dict_arr * arr)
+{
+    char *zErrMsg = 0;
+    check_connected(db);
+
+    char * wh_clauses = create_where_clause(arr);
+    
     char * def_str = "SELECT * FROM ";
     char * sql = (char*) malloc(strlen(table) + strlen(def_str) + strlen(wh_clauses) + 1);
 
@@ -127,17 +121,17 @@ void select_where(char *table, int (*callback)(void *, int, char **, char **), s
     strcat(sql, " ");
     strcat(sql, wh_clauses);
 
-    exec(sql, zErrMsg, callback);
+    if(exec(sql, zErrMsg, callback) == EXIT_FAILURE) return EXIT_FAILURE;
     printsql(sql);
 
     free(sql);
     free(wh_clauses);
 
+    return EXIT_SUCCESS;
 }
 
 int insert_into(char *table, char **values, int len)
 {
-    
     check_connected(db);
     char *zErrMsg = 0;
 
@@ -166,14 +160,52 @@ int insert_into(char *table, char **values, int len)
     strcat(sql, table);
     strcat(sql, value_str);
 
-    exec(sql, zErrMsg, 0x00);
+    if(exec(sql, zErrMsg, NULL) == EXIT_FAILURE) return EXIT_FAILURE;
+
     printsql(sql);
 
     free(sql);
     free(value_str);
-
     return EXIT_SUCCESS;
 
 }
 
+int delete_where(char *table, struct t_dict_arr *arr) 
+{
+    
+    check_connected(db);
+    char *zErrMsg = 0;
+
+    char * wh_clauses = create_where_clause(arr);
+    
+    char * def_str = "DELETE FROM ";
+    char * sql = (char*) malloc(strlen(table) + strlen(wh_clauses) + strlen(def_str) + 1);
+
+    strcpy(sql, def_str);
+    strcat(sql, table);
+    strcat(sql, " ");
+    strcat(sql, wh_clauses);
+
+    printsql(sql);
+    if(exec(sql, zErrMsg, NULL) == EXIT_FAILURE) return EXIT_FAILURE;
+
+    free(sql);
+    free(wh_clauses);
+
+    return EXIT_SUCCESS;
+}
+
+int exec(char * sql, char * zErrMsg, int (*callback)(void *, int, char **, char **)){
+
+    int rc = sqlite3_exec(db, sql, callback, 0, &zErrMsg);
+    
+    if( rc != SQLITE_OK ){
+        fprintf(stderr, "[SQLiter] error: %s\n", zErrMsg);
+        sqlite3_free(zErrMsg);
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+
+}
 
